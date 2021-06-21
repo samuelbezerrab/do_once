@@ -1,6 +1,10 @@
 library flutter_execution;
 
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+enum ExecutionMode { onceForever, onceOnSession }
 
 class Execution {
   Execution._internal();
@@ -35,7 +39,7 @@ class Execution {
       } else {
         print('[Execution] Function "$key" has already been performed.');
       }
-    } else{
+    } else {
       throw Exception(
           '[Execution] \'doOnceForever\' called before Execution is initialized.');
     }
@@ -57,6 +61,26 @@ class Execution {
       throw Exception(
           '[Execution] \'doOnceOnSession\' called before Execution is initialized.');
     }
+  }
+
+  Future<void> doOnceWhenForeground({
+    required String key,
+    required ExecutionMode mode,
+    required void Function() function,
+  }) async {
+    SystemChannels.lifecycle.setMessageHandler((message) async {
+
+      if (message == 'AppLifecycleState.resumed') {
+        if (mode == ExecutionMode.onceForever) {
+          print('[Execution] App in Foreground! Calling doOnceForever method.');
+          await doOnceForever(key: key, function: function);
+        } else if (mode == ExecutionMode.onceOnSession) {
+          print('[Execution] App in Foreground! Calling doOnceOnSession method.');
+          await doOnceOnSession(key: key, function: function);
+        }
+      }
+      return Future.value('');
+    });
   }
 
   Future<void> dispose() async {

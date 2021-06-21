@@ -95,8 +95,16 @@ class _NextPageState extends State<NextPage> {
   void initState() {
     Execution.instance.doOnceOnSession(
       key: 'printonceOnSession',
-      function: () =>
-          print('============= Print only once on session ==============='),
+      function: () async => await Future.delayed(Duration(seconds: 5)).then(
+          (_) => print(
+              '============= Print only once on session ===============')),
+    );
+
+    Execution.instance.doOnceWhenForeground(
+      key: 'onceInForeground',
+      mode: ExecutionMode.onceForever,
+      function: () => print(
+          '============= Print only once on session when foreground ==============='),
     );
     super.initState();
   }
