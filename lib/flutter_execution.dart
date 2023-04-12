@@ -1,5 +1,7 @@
 library flutter_execution;
 
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,16 +28,16 @@ class Execution {
 
   Future<void> doOnceForever({
     required String key,
-    required void Function() function,
+    required FutureOr<dynamic> Function() function,
   }) async {
     bool _done = _preferences.getBool('${_preferencesKey}_$key') ?? false;
 
     if (_isInitialized) {
       if (_done == false) {
+        print('[Execution] Calling function "$key".');
+        await function.call();
         await _preferences.setBool('${_preferencesKey}_$key', true);
 
-        print('[Execution] Calling function "$key".');
-        function.call();
       } else {
         print('[Execution] Function "$key" has already been performed.');
       }
@@ -47,13 +49,14 @@ class Execution {
 
   Future<void> doOnceOnSession({
     required String key,
-    required void Function() function,
+    required FutureOr<dynamic> Function() function,
   }) async {
     if (_isInitialized) {
       if (_sessionCache[key] == null || _sessionCache[key] == false) {
-        _sessionCache[key] = true;
         print('[Execution] Calling function "$key".');
-        function.call();
+        await function.call();
+        _sessionCache[key] = true;
+        
       } else {
         print('[Execution] Function "$key" has already been performed.');
       }
@@ -66,16 +69,16 @@ class Execution {
   Future<void> doOnceWhenForeground({
     required String key,
     required ExecutionMode mode,
-    required void Function() function,
+    required FutureOr<dynamic> Function() function,
   }) async {
     SystemChannels.lifecycle.setMessageHandler((message) async {
-
       if (message == 'AppLifecycleState.resumed') {
         if (mode == ExecutionMode.onceForever) {
           print('[Execution] App in Foreground! Calling doOnceForever method.');
           await doOnceForever(key: key, function: function);
         } else if (mode == ExecutionMode.onceOnSession) {
-          print('[Execution] App in Foreground! Calling doOnceOnSession method.');
+          print(
+              '[Execution] App in Foreground! Calling doOnceOnSession method.');
           await doOnceOnSession(key: key, function: function);
         }
       }
