@@ -37,7 +37,6 @@ class Execution {
         print('[Execution] Calling function "$key".');
         await function.call();
         await _preferences.setBool('${_preferencesKey}_$key', true);
-
       } else {
         print('[Execution] Function "$key" has already been performed.');
       }
@@ -56,7 +55,6 @@ class Execution {
         print('[Execution] Calling function "$key".');
         await function.call();
         _sessionCache[key] = true;
-        
       } else {
         print('[Execution] Function "$key" has already been performed.');
       }
@@ -84,6 +82,18 @@ class Execution {
       }
       return Future.value('');
     });
+  }
+
+  Future<void> revokeKey(String key) async {
+    if (_preferences.containsKey('${_preferencesKey}_$key')) {
+      await _preferences.setBool('${_preferencesKey}_$key', false);
+    }
+
+    if (_sessionCache.containsKey(key)) {
+      _sessionCache[key] = false;
+    }
+
+    print('[Execution] Function "$key" has been revoked.');
   }
 
   Future<void> dispose() async {
