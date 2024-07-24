@@ -84,6 +84,30 @@ class Execution {
     });
   }
 
+  Future<void> doDaily({
+    required String key,
+    required FutureOr<dynamic> Function() function,
+  }) async {
+    final today = DateTime.now();
+    final todayKey = "${today.day}${today.month}${today.year}";
+    final fullKey = '${_preferencesKey}_${todayKey}_$key';
+
+    bool _done = _preferences.getBool(fullKey) ?? false;
+
+    if (_isInitialized) {
+      if (_done == false) {
+        print('[Execution] Calling function "$key".');
+        await function.call();
+        await _preferences.setBool(fullKey, true);
+      } else {
+        print('[Execution] Function "$key" has already been performed today.');
+      }
+    } else {
+      throw Exception(
+          '[Execution] \'doDaily\' called before Execution is initialized.');
+    }
+  }
+
   Future<void> revokeKey(String key) async {
     if (_preferences.containsKey('${_preferencesKey}_$key')) {
       await _preferences.setBool('${_preferencesKey}_$key', false);
