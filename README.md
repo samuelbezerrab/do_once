@@ -91,12 +91,11 @@ for that key, but does not revoke daily markers.
 
 `Future<void> dispose()` rejects new actions immediately and waits for all
 accepted actions, including bypassed actions and failures. An action that never
-finishes prevents disposal from completing. It then clears the session cache and calls `clear()` on the
-shared preferences instance. **This removes all shared preferences for the
-application, not just this package's markers.** This pre-existing behavior
-also removes markers written by actions during disposal. It resets
-`isInitialized`. `revokeKey` is not queued: coordinate revocations with pending
-and running actions yourself.
+finishes prevents disposal from completing. It then clears the in-memory
+session cache and resets `isInitialized`, without removing any shared
+preferences. Permanent and daily markers, including those written by actions
+drained during disposal, remain in storage. `revokeKey` is not queued:
+coordinate revocations with pending and running actions yourself.
 
 ## Concurrency and persistence
 

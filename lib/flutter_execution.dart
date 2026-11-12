@@ -177,7 +177,6 @@ class Execution {
                 onError: (Object error, StackTrace stack) {}))
             .toList());
         _sessionCache.clear();
-        await _preferences.clear();
       } finally {
         _isInitialized = false;
         _closing = false;
