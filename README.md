@@ -1,22 +1,27 @@
-# Execution
+# Do Once
 
-`flutter_execution` runs keyed actions once per in-memory session, once per
-persistent marker, or once per local calendar day. Actions may be synchronous
-or asynchronous.
+Run keyed actions once per session, once per local day, or once using a
+persistent marker. Actions may be synchronous or asynchronous.
 
 ## Installation
 
 ```yaml
 dependencies:
-  flutter_execution:
+  do_once:
     git:
       url: git@github.com:App2Sales/flutter-execution.git
       ref: master
 ```
 
 ```dart
-import 'package:flutter_execution/flutter_execution.dart';
+import 'package:do_once/do_once.dart';
 ```
+
+The Git ref must contain the renamed `do_once` package. If migrating from
+`flutter_execution`, update the dependency name and imports; the `Execution`
+class and method names remain unchanged. Markers stored under the former
+`A2S-Execution` prefix are not migrated, so actions may run again; see
+[shared preferences](docs/shared-preferences.md) for details.
 
 ## Initialization
 

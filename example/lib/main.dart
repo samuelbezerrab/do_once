@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_execution/flutter_execution.dart';
+import 'package:do_once/do_once.dart';
 
 void main() {
   runApp(ExecutionExample());

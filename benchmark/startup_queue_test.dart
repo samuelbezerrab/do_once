@@ -2,7 +2,7 @@
 // This measures event-loop latency, not Flutter frame rendering.
 import 'dart:async';
 
-import 'package:flutter_execution/flutter_execution.dart';
+import 'package:do_once/do_once.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

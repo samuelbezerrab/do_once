@@ -1,4 +1,4 @@
-import 'package:flutter_execution/flutter_execution.dart';
+import 'package:do_once/do_once.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

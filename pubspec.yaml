@@ -1,5 +1,5 @@
-name: flutter_execution
-description: A new Flutter package project.
+name: do_once
+description: Run keyed actions once per session, once per local day, or once using a persistent marker.
 version: 0.0.1
 homepage: https://github.com/App2Sales/flutter-execution.git
 

@@ -2,7 +2,7 @@
 
 Todas as chaves que a biblioteca grava em `SharedPreferences` começam com
 `do_once_`. A aplicação e outras bibliotecas devem reservar esse prefixo para o
-`flutter_execution`: o prefixo, sozinho, não comprova a origem de uma chave se
+`do_once`: o prefixo, sozinho, não comprova a origem de uma chave se
 outro componente também o utilizar.
 
 | Escopo | Formato da chave | Valor |
