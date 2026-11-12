@@ -203,3 +203,7 @@ was not available for runtime verification.
 `doOnceWhenForeground` and `ExecutionMode` have been removed. There is no
 replacement foreground API; applications using them must remove those calls
 and handle lifecycle events separately.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
