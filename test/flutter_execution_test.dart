@@ -32,6 +32,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await Execution.instance.initialize();
     await Execution.instance.dispose();
+    await Execution.instance.initialize();
   });
 
   test('overlapping session calls share one execution', () async {
@@ -247,16 +248,19 @@ void main() {
     var calls = 0;
     await Execution.instance.doOnceOnSession(
         key: 'other',
+        bypassQueue: true,
         function: () {
           calls++;
         });
     await Execution.instance.doOnceForever(
         key: 'same',
+        bypassQueue: true,
         function: () {
           calls++;
         });
     await Execution.instance.doDaily(
         key: 'same',
+        bypassQueue: true,
         function: () {
           calls++;
         });

@@ -33,6 +33,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await Execution.instance.initialize();
     await Execution.instance.dispose();
+    await Execution.instance.initialize();
 
     expect(
         Execution.instance
@@ -49,6 +50,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await Execution.instance.initialize();
     await Execution.instance.dispose();
+    await Execution.instance.initialize();
 
     expect(
         Execution.instance
@@ -69,6 +71,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await Execution.instance.initialize();
     await Execution.instance.dispose();
+    await Execution.instance.initialize();
     final day = Clock.fixed(DateTime(2024, 1, 1, 23, 59));
     final nextDay = Clock.fixed(DateTime(2024, 1, 2));
 
@@ -110,6 +113,7 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       await Execution.instance.initialize();
       await Execution.instance.dispose();
+      await Execution.instance.initialize();
       final gate = Completer<void>();
       var calls = 0;
       final execution = runners[scope]!('pending-$scope', () {
@@ -135,6 +139,7 @@ void main() {
       SharedPreferences.setMockInitialValues({});
       await Execution.instance.initialize();
       await Execution.instance.dispose();
+      await Execution.instance.initialize();
       await expectLater(
           runners[scope]!('failed-$scope', () => throw StateError('failure')),
           throwsStateError);
@@ -174,6 +179,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await Execution.instance.initialize();
     await Execution.instance.dispose();
+    await Execution.instance.initialize();
     for (final scope in ExecutionScope.values) {
       await runners[scope]!('revoked', () {});
       expect(

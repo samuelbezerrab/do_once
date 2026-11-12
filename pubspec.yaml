@@ -9,6 +9,7 @@ environment:
 
 dependencies:
   clock: ^1.1.0
+  queue: ^3.4.0
   flutter:
     sdk: flutter
   shared_preferences: ^2.0.6
