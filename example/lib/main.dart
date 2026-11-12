@@ -100,12 +100,6 @@ class _NextPageState extends State<NextPage> {
               '============= Print only once on session ===============')),
     );
 
-    Execution.instance.doOnceWhenForeground(
-      key: 'onceInForeground',
-      mode: ExecutionMode.onceForever,
-      function: () => print(
-          '============= Print only once on session when foreground ==============='),
-    );
     super.initState();
   }
 

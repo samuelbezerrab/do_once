@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:clock/clock.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_execution/flutter_execution.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -282,58 +281,4 @@ void main() {
         });
     expect(calls, 2);
   });
-
-  for (final mode in ExecutionMode.values) {
-    test('foreground delegates to $mode coordination', () async {
-      final gate = Completer<void>();
-      var calls = 0;
-      final direct = mode == ExecutionMode.onceForever
-          ? Execution.instance.doOnceForever(
-              key: 'foreground',
-              function: () {
-                calls++;
-                return gate.future;
-              })
-          : Execution.instance.doOnceOnSession(
-              key: 'foreground',
-              function: () {
-                calls++;
-                return gate.future;
-              });
-      await Execution.instance.doOnceWhenForeground(
-          key: 'foreground',
-          mode: mode,
-          function: () {
-            calls++;
-          });
-      final reply = Completer<void>();
-      // Flutter 2.2 exposes the messenger through ServicesBinding.
-      // ignore: deprecated_member_use, unnecessary_non_null_assertion
-      ServicesBinding.instance!.defaultBinaryMessenger.handlePlatformMessage(
-          'flutter/lifecycle',
-          const StringCodec().encodeMessage('AppLifecycleState.resumed'),
-          (_) => reply.complete());
-      await Future<void>.delayed(Duration.zero);
-      expect(calls, 1);
-      expect(reply.isCompleted, false);
-      gate.complete();
-      await direct;
-      await reply.future;
-      expect(calls, 1);
-      await Execution.instance.doOnceWhenForeground(
-          key: 'foreground-only',
-          mode: mode,
-          function: () {
-            calls++;
-          });
-      final secondReply = Completer<void>();
-      // ignore: deprecated_member_use, unnecessary_non_null_assertion
-      ServicesBinding.instance!.defaultBinaryMessenger.handlePlatformMessage(
-          'flutter/lifecycle',
-          const StringCodec().encodeMessage('AppLifecycleState.resumed'),
-          (_) => secondReply.complete());
-      await secondReply.future;
-      expect(calls, 2);
-    });
-  }
 }

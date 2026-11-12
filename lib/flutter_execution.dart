@@ -3,10 +3,9 @@ library flutter_execution;
 import 'dart:async';
 
 import 'package:clock/clock.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum ExecutionMode { onceForever, onceOnSession }
+enum ExecutionScope { session, forever, daily }
 
 class Execution {
   Execution._internal();
@@ -23,25 +22,42 @@ class Execution {
   static final Map<String, List<_Attempt>> _sessionAttempts = {};
   static final Map<String, List<_Attempt>> _foreverAttempts = {};
   static final Map<String, List<_Attempt>> _dailyAttempts = {};
-  static final Set<String> _failedWrites = {};
+  static final Set<String> _unconfirmedWrites = {};
+
+  bool _isMarkedDone(String key) =>
+      !_unconfirmedWrites.contains(key) && (_preferences.getBool(key) ?? false);
 
   Future<void> _markDone(String key) async {
-    try {
-      if (!await _preferences.setBool(key, true)) {
-        throw StateError('Failed to persist execution marker for "$key".');
-      }
-      _failedWrites.remove(key);
-    } catch (_) {
-      // SharedPreferences updates its cache before the platform write finishes.
-      _failedWrites.add(key);
-      rethrow;
+    // SharedPreferences updates its cache before the platform write finishes.
+    _unconfirmedWrites.add(key);
+    if (!await _preferences.setBool(key, true)) {
+      throw StateError('Failed to persist execution marker for "$key".');
     }
+    _unconfirmedWrites.remove(key);
   }
 
   Future<void> initialize() async {
     _preferences = await SharedPreferences.getInstance();
     _isInitialized = true;
   }
+
+  bool hasExecuted({required String key, required ExecutionScope scope}) {
+    if (!_isInitialized) {
+      throw StateError(
+          '[Execution] Query called before Execution is initialized.');
+    }
+    if (scope == ExecutionScope.session) return _sessionCache[key] == true;
+    if (scope == ExecutionScope.forever) {
+      return _isMarkedDone('${_preferencesKey}_$key');
+    }
+    return _isMarkedDone(_dailyKey(key, clock.now()));
+  }
+
+  static String _day(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  static String _dailyKey(String key, DateTime date) =>
+      '$_preferencesKey-daily-v2_${_day(date)}_$key';
 
   Future<void> doOnceForever({
     required String key,
@@ -50,8 +66,7 @@ class Execution {
     return _coordinate(_foreverAttempts, key, '', () async {
       if (_isInitialized) {
         final fullKey = '${_preferencesKey}_$key';
-        final _done = !_failedWrites.contains(fullKey) &&
-            (_preferences.getBool(fullKey) ?? false);
+        final _done = _isMarkedDone(fullKey);
         if (_done == false) {
           print('[Execution] Calling function "$key".');
           await function.call();
@@ -86,38 +101,16 @@ class Execution {
     });
   }
 
-  Future<void> doOnceWhenForeground({
-    required String key,
-    required ExecutionMode mode,
-    required FutureOr<dynamic> Function() function,
-  }) async {
-    SystemChannels.lifecycle.setMessageHandler((message) async {
-      if (message == 'AppLifecycleState.resumed') {
-        if (mode == ExecutionMode.onceForever) {
-          print('[Execution] App in Foreground! Calling doOnceForever method.');
-          await doOnceForever(key: key, function: function);
-        } else if (mode == ExecutionMode.onceOnSession) {
-          print(
-              '[Execution] App in Foreground! Calling doOnceOnSession method.');
-          await doOnceOnSession(key: key, function: function);
-        }
-      }
-      return Future.value('');
-    });
-  }
-
   Future<void> doDaily({
     required String key,
     required FutureOr<dynamic> Function() function,
   }) {
     final today = clock.now();
-    final todayKey =
-        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-    final fullKey = '$_preferencesKey-daily-v2_${todayKey}_$key';
+    final todayKey = _day(today);
+    final fullKey = _dailyKey(key, today);
     return _coordinate(_dailyAttempts, key, todayKey, () async {
       if (_isInitialized) {
-        final _done = !_failedWrites.contains(fullKey) &&
-            (_preferences.getBool(fullKey) ?? false);
+        final _done = _isMarkedDone(fullKey);
         if (_done == false) {
           print('[Execution] Calling function "$key".');
           await function.call();
