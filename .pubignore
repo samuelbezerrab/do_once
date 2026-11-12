@@ -1,0 +1,35 @@
+# Local tooling and generated files
+.dart_tool/
+.fvm/
+.idea/
+.vscode/
+.scratch/
+.pub/
+.pub-cache/
+build/
+**/doc/api/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.iml
+*.log
+*.swp
+.DS_Store
+
+# Internal project notes, not package documentation
+AGENTS.md
+GLOSSARY.md
+docs/
+
+# Generated platform files
+**/android/**/gradle-wrapper.jar
+**/android/.gradle/
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/DerivedData/
+**/ios/**/xcuserdata/

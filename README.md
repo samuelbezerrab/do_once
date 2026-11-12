@@ -42,23 +42,19 @@ app and on representative devices.
 
 ## Installation
 
-```yaml
-dependencies:
-  do_once:
-    git:
-      url: git@github.com:App2Sales/flutter-execution.git
-      ref: master
+Once published on pub.dev, add the package with:
+
+```sh
+flutter pub add do_once
 ```
 
 ```dart
 import 'package:do_once/do_once.dart';
 ```
 
-The Git ref must contain the renamed `do_once` package. If migrating from
-`flutter_execution`, update the dependency name and imports; the `Execution`
+If migrating from `flutter_execution`, update the dependency name and imports; the `Execution`
 class and method names remain unchanged. Markers stored under the former
-`A2S-Execution` prefix are not migrated, so actions may run again; see
-[shared preferences](docs/shared-preferences.md) for details.
+`A2S-Execution` prefix are not migrated, so actions may run again.
 
 ## Initialization
 
