@@ -18,7 +18,7 @@ class Execution {
 
   static late SharedPreferences _preferences;
   static bool _isInitialized = false;
-  static const String _preferencesKey = 'A2S-Execution';
+  static const String _preferencesPrefix = 'do_once_';
   static late Map<String, bool> _sessionCache = {};
   static final Map<String, List<_Attempt>> _sessionAttempts = {};
   static final Map<String, List<_Attempt>> _foreverAttempts = {};
@@ -71,7 +71,7 @@ class Execution {
     }
     if (scope == ExecutionScope.session) return _sessionCache[key] == true;
     if (scope == ExecutionScope.forever) {
-      return _isMarkedDone('${_preferencesKey}_$key');
+      return _isMarkedDone(_foreverKey(key));
     }
     return _isMarkedDone(_dailyKey(key, clock.now()));
   }
@@ -79,8 +79,10 @@ class Execution {
   static String _day(DateTime date) =>
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
+  static String _foreverKey(String key) => '${_preferencesPrefix}forever_$key';
+
   static String _dailyKey(String key, DateTime date) =>
-      '$_preferencesKey-daily-v2_${_day(date)}_$key';
+      '${_preferencesPrefix}daily_v2_${_day(date)}_$key';
 
   Future<void> doOnceForever({
     required String key,
@@ -89,7 +91,7 @@ class Execution {
   }) {
     return _coordinate(_foreverAttempts, key, '', () async {
       if (_isInitialized) {
-        final fullKey = '${_preferencesKey}_$key';
+        final fullKey = _foreverKey(key);
         final _done = _isMarkedDone(fullKey);
         if (_done == false) {
           print('[Execution] Calling function "$key".');
@@ -153,8 +155,8 @@ class Execution {
   }
 
   Future<void> revokeKey(String key) async {
-    if (_preferences.containsKey('${_preferencesKey}_$key')) {
-      await _preferences.setBool('${_preferencesKey}_$key', false);
+    if (_preferences.containsKey(_foreverKey(key))) {
+      await _preferences.setBool(_foreverKey(key), false);
     }
 
     if (_sessionCache.containsKey(key)) {
