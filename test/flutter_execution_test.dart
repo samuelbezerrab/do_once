@@ -40,6 +40,9 @@ void main() {
     'session': (key, action) => Do.oncePerSession(key: key, function: action),
     'forever': (key, action) => Do.once(key: key, function: action),
     'daily': (key, action) => Do.oncePerDay(key: key, function: action),
+    'hourly': (key, action) => Do.oncePerHour(key: key, function: action),
+    'monthly': (key, action) => Do.oncePerMonth(key: key, function: action),
+    'yearly': (key, action) => Do.oncePerYear(key: key, function: action),
   };
 
   for (final entry in runners.entries) {
@@ -131,7 +134,7 @@ void main() {
         await Do.hasExecuted(key: key('alias'), scope: DoScope.forever), true);
   });
 
-  for (final scope in ['forever', 'daily']) {
+  for (final scope in ['forever', 'daily', 'hourly', 'monthly', 'yearly']) {
     for (final throws in [false, true]) {
       test(
           '$scope propagates ${throws ? 'thrown' : 'false'} write failure and retries',

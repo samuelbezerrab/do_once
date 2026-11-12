@@ -43,6 +43,10 @@ void main() {
         Do.oncePerSession(key: key, function: action),
     DoScope.forever: (key, action) => Do.once(key: key, function: action),
     DoScope.daily: (key, action) => Do.oncePerDay(key: key, function: action),
+    DoScope.hourly: (key, action) => Do.oncePerHour(key: key, function: action),
+    DoScope.monthly: (key, action) =>
+        Do.oncePerMonth(key: key, function: action),
+    DoScope.yearly: (key, action) => Do.oncePerYear(key: key, function: action),
   };
 
   for (final scope in DoScope.values) {
@@ -104,7 +108,13 @@ void main() {
     });
   }
 
-  for (final scope in [DoScope.forever, DoScope.daily]) {
+  for (final scope in [
+    DoScope.forever,
+    DoScope.daily,
+    DoScope.hourly,
+    DoScope.monthly,
+    DoScope.yearly,
+  ]) {
     test('$scope remains incomplete while marker persistence is pending',
         () async {
       final store = PendingStore();

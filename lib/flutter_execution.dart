@@ -5,7 +5,7 @@ import 'package:clock/clock.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// The independent periods in which an action can be completed.
-enum DoScope { session, forever, daily }
+enum DoScope { session, forever, daily, hourly, monthly, yearly }
 
 /// Runs keyed actions once per scope and period in this isolate.
 ///
@@ -14,9 +14,7 @@ enum DoScope { session, forever, daily }
 abstract final class Do {
   static const String _preferencesPrefix = 'do_once_';
   static final Set<String> _sessionCompleted = {};
-  static final Map<String, List<_Attempt>> _sessionAttempts = {};
-  static final Map<String, List<_Attempt>> _foreverAttempts = {};
-  static final Map<String, List<_Attempt>> _dailyAttempts = {};
+  static final Map<DoScope, Map<String, List<_Attempt>>> _attempts = {};
   static final Set<String> _unconfirmedWrites = {};
   static final _WorkQueue _workQueue = _WorkQueue();
 
@@ -37,16 +35,8 @@ abstract final class Do {
     required String key,
     required FutureOr<dynamic> Function() function,
     bool bypassQueue = false,
-  }) {
-    final fullKey = _foreverKey(key);
-    return _coordinate(_foreverAttempts, key, '', () async {
-      final preferences = await SharedPreferences.getInstance();
-      if (!_isMarkedDone(preferences, fullKey)) {
-        await function();
-        await _markDone(preferences, fullKey);
-      }
-    }, bypassQueue);
-  }
+  }) =>
+      _execute(DoScope.forever, key, function, bypassQueue);
 
   /// An alias for [once], sharing the same key, scope, and execution attempt.
   static Future<void> onceAndDone({
@@ -61,25 +51,54 @@ abstract final class Do {
     required String key,
     required FutureOr<dynamic> Function() function,
     bool bypassQueue = false,
-  }) {
-    return _coordinate(_sessionAttempts, key, '', () async {
-      if (!_sessionCompleted.contains(key)) {
-        await function();
-        _sessionCompleted.add(key);
-      }
-    }, bypassQueue);
-  }
+  }) =>
+      _execute(DoScope.session, key, function, bypassQueue);
 
   /// Runs [function] once for [key] on the local calendar day of this call.
   static Future<void> oncePerDay({
     required String key,
     required FutureOr<dynamic> Function() function,
     bool bypassQueue = false,
-  }) {
-    final today = clock.now();
-    final period = _day(today);
-    final fullKey = _dailyKey(key, today);
-    return _coordinate(_dailyAttempts, key, period, () async {
+  }) =>
+      _execute(DoScope.daily, key, function, bypassQueue);
+
+  /// Runs [function] once for [key] during the local calendar hour of this call.
+  static Future<void> oncePerHour({
+    required String key,
+    required FutureOr<dynamic> Function() function,
+    bool bypassQueue = false,
+  }) =>
+      _execute(DoScope.hourly, key, function, bypassQueue);
+
+  /// Runs [function] once for [key] during the local calendar month of this call.
+  static Future<void> oncePerMonth({
+    required String key,
+    required FutureOr<dynamic> Function() function,
+    bool bypassQueue = false,
+  }) =>
+      _execute(DoScope.monthly, key, function, bypassQueue);
+
+  /// Runs [function] once for [key] during the local calendar year of this call.
+  static Future<void> oncePerYear({
+    required String key,
+    required FutureOr<dynamic> Function() function,
+    bool bypassQueue = false,
+  }) =>
+      _execute(DoScope.yearly, key, function, bypassQueue);
+
+  static Future<void> _execute(DoScope scope, String key,
+      FutureOr<dynamic> Function() function, bool bypassQueue) {
+    final period = _period(scope);
+    final attempts = _attempts.putIfAbsent(scope, () => {});
+    return _coordinate(attempts, key, period, () async {
+      if (scope == DoScope.session) {
+        if (!_sessionCompleted.contains(key)) {
+          await function();
+          _sessionCompleted.add(key);
+        }
+        return;
+      }
+      final fullKey = _storageKey(scope, key, period);
       final preferences = await SharedPreferences.getInstance();
       if (!_isMarkedDone(preferences, fullKey)) {
         await function();
@@ -97,14 +116,12 @@ abstract final class Do {
     required DoScope scope,
   }) async {
     if (scope == DoScope.session) return _sessionCompleted.contains(key);
-    final fullKey = scope == DoScope.forever
-        ? _foreverKey(key)
-        : _dailyKey(key, clock.now());
+    final fullKey = _storageKey(scope, key, _period(scope));
     final preferences = await SharedPreferences.getInstance();
     return _isMarkedDone(preferences, fullKey);
   }
 
-  /// Revokes [key] in [scope], using today's local date for the daily scope.
+  /// Revokes [key] in [scope], using the current local calendar period.
   ///
   /// Revocation does not wait for an action already in progress, which may
   /// subsequently record its completion.
@@ -116,9 +133,7 @@ abstract final class Do {
       _sessionCompleted.remove(key);
       return;
     }
-    final fullKey = scope == DoScope.forever
-        ? _foreverKey(key)
-        : _dailyKey(key, clock.now());
+    final fullKey = _storageKey(scope, key, _period(scope));
     final preferences = await SharedPreferences.getInstance();
     if (preferences.containsKey(fullKey) &&
         !await preferences.setBool(fullKey, false)) {
@@ -139,13 +154,30 @@ abstract final class Do {
     _unconfirmedWrites.remove(key);
   }
 
-  static String _day(DateTime date) =>
-      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  static String _period(DoScope scope) {
+    if (scope == DoScope.session || scope == DoScope.forever) return '';
+    final now = clock.now();
+    final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+    final day = '$month-${now.day.toString().padLeft(2, '0')}';
+    return switch (scope) {
+      DoScope.hourly => '$day-${now.hour.toString().padLeft(2, '0')}',
+      DoScope.daily => day,
+      DoScope.monthly => month,
+      DoScope.yearly => '${now.year}',
+      DoScope.session || DoScope.forever => '',
+    };
+  }
 
-  static String _foreverKey(String key) => '${_preferencesPrefix}forever_$key';
-
-  static String _dailyKey(String key, DateTime date) =>
-      '${_preferencesPrefix}daily_v2_${_day(date)}_$key';
+  static String _storageKey(DoScope scope, String key, String period) =>
+      switch (scope) {
+        DoScope.forever => '${_preferencesPrefix}forever_$key',
+        DoScope.daily => '${_preferencesPrefix}daily_v2_${period}_$key',
+        DoScope.hourly => '${_preferencesPrefix}hourly_${period}_$key',
+        DoScope.monthly => '${_preferencesPrefix}monthly_${period}_$key',
+        DoScope.yearly => '${_preferencesPrefix}yearly_${period}_$key',
+        DoScope.session =>
+          throw StateError('Session markers are not persistent.'),
+      };
 }
 
 class _Attempt {
