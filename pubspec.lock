@@ -30,7 +30,7 @@ packages:
     source: hosted
     version: "1.2.0"
   clock:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: clock
       url: "https://pub.dartlang.org"
@@ -171,7 +171,7 @@ packages:
     source: hosted
     version: "2.0.0"
   shared_preferences_platform_interface:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: shared_preferences_platform_interface
       url: "https://pub.dartlang.org"

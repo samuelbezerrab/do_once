@@ -2,8 +2,8 @@ library flutter_execution;
 
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum ExecutionMode { onceForever, onceOnSession }
@@ -20,6 +20,23 @@ class Execution {
   static bool _isInitialized = false;
   static const String _preferencesKey = 'A2S-Execution';
   static late Map<String, bool> _sessionCache = {};
+  static final Map<String, List<_Attempt>> _sessionAttempts = {};
+  static final Map<String, List<_Attempt>> _foreverAttempts = {};
+  static final Map<String, List<_Attempt>> _dailyAttempts = {};
+  static final Set<String> _failedWrites = {};
+
+  Future<void> _markDone(String key) async {
+    try {
+      if (!await _preferences.setBool(key, true)) {
+        throw StateError('Failed to persist execution marker for "$key".');
+      }
+      _failedWrites.remove(key);
+    } catch (_) {
+      // SharedPreferences updates its cache before the platform write finishes.
+      _failedWrites.add(key);
+      rethrow;
+    }
+  }
 
   Future<void> initialize() async {
     _preferences = await SharedPreferences.getInstance();
@@ -29,39 +46,44 @@ class Execution {
   Future<void> doOnceForever({
     required String key,
     required FutureOr<dynamic> Function() function,
-  }) async {
-    bool _done = _preferences.getBool('${_preferencesKey}_$key') ?? false;
-
-    if (_isInitialized) {
-      if (_done == false) {
-        print('[Execution] Calling function "$key".');
-        await function.call();
-        await _preferences.setBool('${_preferencesKey}_$key', true);
+  }) {
+    return _coordinate(_foreverAttempts, key, '', () async {
+      if (_isInitialized) {
+        final fullKey = '${_preferencesKey}_$key';
+        final _done = !_failedWrites.contains(fullKey) &&
+            (_preferences.getBool(fullKey) ?? false);
+        if (_done == false) {
+          print('[Execution] Calling function "$key".');
+          await function.call();
+          await _markDone(fullKey);
+        } else {
+          print('[Execution] Function "$key" has already been performed.');
+        }
       } else {
-        print('[Execution] Function "$key" has already been performed.');
+        throw Exception(
+            '[Execution] \'doOnceForever\' called before Execution is initialized.');
       }
-    } else {
-      throw Exception(
-          '[Execution] \'doOnceForever\' called before Execution is initialized.');
-    }
+    });
   }
 
   Future<void> doOnceOnSession({
     required String key,
     required FutureOr<dynamic> Function() function,
-  }) async {
-    if (_isInitialized) {
-      if (_sessionCache[key] == null || _sessionCache[key] == false) {
-        print('[Execution] Calling function "$key".');
-        await function.call();
-        _sessionCache[key] = true;
+  }) {
+    return _coordinate(_sessionAttempts, key, '', () async {
+      if (_isInitialized) {
+        if (_sessionCache[key] == null || _sessionCache[key] == false) {
+          print('[Execution] Calling function "$key".');
+          await function.call();
+          _sessionCache[key] = true;
+        } else {
+          print('[Execution] Function "$key" has already been performed.');
+        }
       } else {
-        print('[Execution] Function "$key" has already been performed.');
+        throw Exception(
+            '[Execution] \'doOnceOnSession\' called before Execution is initialized.');
       }
-    } else {
-      throw Exception(
-          '[Execution] \'doOnceOnSession\' called before Execution is initialized.');
-    }
+    });
   }
 
   Future<void> doOnceWhenForeground({
@@ -87,25 +109,28 @@ class Execution {
   Future<void> doDaily({
     required String key,
     required FutureOr<dynamic> Function() function,
-  }) async {
-    final today = DateTime.now();
-    final todayKey = "${today.day}${today.month}${today.year}";
-    final fullKey = '${_preferencesKey}_${todayKey}_$key';
-
-    bool _done = _preferences.getBool(fullKey) ?? false;
-
-    if (_isInitialized) {
-      if (_done == false) {
-        print('[Execution] Calling function "$key".');
-        await function.call();
-        await _preferences.setBool(fullKey, true);
+  }) {
+    final today = clock.now();
+    final todayKey =
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+    final fullKey = '$_preferencesKey-daily-v2_${todayKey}_$key';
+    return _coordinate(_dailyAttempts, key, todayKey, () async {
+      if (_isInitialized) {
+        final _done = !_failedWrites.contains(fullKey) &&
+            (_preferences.getBool(fullKey) ?? false);
+        if (_done == false) {
+          print('[Execution] Calling function "$key".');
+          await function.call();
+          await _markDone(fullKey);
+        } else {
+          print(
+              '[Execution] Function "$key" has already been performed today.');
+        }
       } else {
-        print('[Execution] Function "$key" has already been performed today.');
+        throw Exception(
+            '[Execution] \'doDaily\' called before Execution is initialized.');
       }
-    } else {
-      throw Exception(
-          '[Execution] \'doDaily\' called before Execution is initialized.');
-    }
+    });
   }
 
   Future<void> revokeKey(String key) async {
@@ -130,4 +155,43 @@ class Execution {
           '[Execution] Dispose called before Execution is initialized.');
     }
   }
+}
+
+class _Attempt {
+  _Attempt(this.period);
+
+  final String period;
+  final Completer<void> completer = Completer<void>();
+}
+
+Future<void> _coordinate(Map<String, List<_Attempt>> attempts, String key,
+    String period, Future<void> Function() action) {
+  final queue = attempts.putIfAbsent(key, () => <_Attempt>[]);
+  for (final attempt in queue) {
+    if (attempt.period == period) return attempt.completer.future;
+  }
+  final previous = queue.isEmpty ? null : queue.last;
+  final attempt = _Attempt(period);
+  queue.add(attempt);
+  // A callback must not call and await the same key and scope recursively.
+  () async {
+    if (previous != null) {
+      try {
+        await previous.completer.future;
+      } catch (_) {
+        // A later period gets its own attempt even if the earlier one failed.
+      }
+    }
+    try {
+      await action();
+      queue.remove(attempt);
+      if (queue.isEmpty) attempts.remove(key);
+      attempt.completer.complete();
+    } catch (error, stack) {
+      queue.remove(attempt);
+      if (queue.isEmpty) attempts.remove(key);
+      attempt.completer.completeError(error, stack);
+    }
+  }();
+  return attempt.completer.future;
 }

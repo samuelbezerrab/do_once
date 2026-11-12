@@ -82,6 +82,22 @@ Execution.instance.doOnceWhenForeground(
     );
 ```
 
+`doDaily` executes an action once per local calendar day, using the day at the
+start of the call. Daily markers now use an unambiguous, versioned date key;
+older daily markers are neither read nor migrated because their dates can be
+ambiguous. Consequently, an action may run again after upgrading.
+
+Overlapping calls with the same key and scope in the same isolate share one
+attempt and its result. Different keys and scopes are independent. A daily
+call for a new day waits for an earlier day's attempt for the same key, then
+starts its own attempt even if the earlier one failed. Failed callbacks or
+marker writes are reported to all callers; a later call can retry.
+
+This coordination does not extend across isolates or processes. It cannot
+guarantee an external effect occurs exactly once: an interruption or failed
+marker write after the effect may cause it to be repeated. Coordinate
+`revokeKey` and `dispose` separately with any ongoing executions.
+
 After using this package, dispose it. This will delete locally saved functions identifiers.
 
 ```dart
