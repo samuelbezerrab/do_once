@@ -1,22 +1,27 @@
 # Do Once
 
+[![pub package](https://img.shields.io/pub/v/do_once.svg)](https://pub.dev/packages/do_once)
+[![pub points](https://img.shields.io/pub/points/do_once)](https://pub.dev/packages/do_once/score)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Easily run tasks that shouldn’t run every time.
+
+```dart
+await Do.once(
+  key: 'welcome',
+  function: () async => welcomeUser(),
+);
+```
 
 do_once runs actions identified by a key once per session, once per local day, or once until reset. It automatically queues actions to limit concurrent work and supports both synchronous and asynchronous callbacks.
 
 Following the Don’t Repeat Yourself (DRY) principle, it tracks completed actions so you don’t have to write the same checks throughout your app.
 
-## Installation
-
-```sh
-flutter pub add do_once
-```
-
+## How to use
 ```dart
 import 'package:do_once/do_once.dart';
 ```
 
-## Execute actions
 
 ```dart
 await Do.oncePerSession(
@@ -56,10 +61,10 @@ It returns `Future<void>`. Completion is recorded only after the function
 succeeds and, for persistent scopes, the marker is written successfully.
 Errors are propagated; a subsequent call may retry.
 
+[!NOTE]
 Calendar scopes use the local calendar period **when the call is made**, even if
 the action starts later. They do not schedule actions. If a local hour repeats
-when clocks move back, both occurrences share the same hourly marker. A permanent
-marker lasts only as long as the underlying storage retains it.
+when clocks move back, both occurrences share the same hourly marker.
 
 ## Query and revoke
 
