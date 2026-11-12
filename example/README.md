@@ -1,16 +1,25 @@
-# flutter_execution_example
+# Do Once example
 
-A new Flutter project.
+An interactive demo of the execution scopes in [`do_once`](../README.md).
 
-## Getting Started
+From this directory, run:
 
-This project is a starting point for a Flutter application.
+```sh
+flutter pub get
+flutter run
+```
 
-A few resources to get you started if this is your first Flutter project:
+Choose a scope and select **Celebrate**. The first call shows confetti and
+records its completion; subsequent calls with the same key and scope skip it.
+The activity log shows what happened. Select **Reset completion** to revoke
+that scope's marker and celebrate again. The default, **Until reset**, uses
+`Do.once`.
 
-- [Lab: Write your first Flutter app](https://flutter.dev/docs/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://flutter.dev/docs/cookbook)
+Session completion lasts for the current isolate. The other scopes use persistent
+storage: **Until reset** has no calendar expiration, while hourly, daily,
+monthly, and yearly completion applies to the current local calendar period.
+Scopes are independent, even when they use the same key. Resetting a calendar
+scope affects only its current period.
 
-For help getting started with Flutter, view our
-[online documentation](https://flutter.dev/docs), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+For API details, queue configuration, and limitations, see the
+[package README](../README.md) and [configuration guide](../docs/configuration.md).
