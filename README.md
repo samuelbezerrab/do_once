@@ -3,6 +3,43 @@
 Run keyed actions once per session, once per local day, or once using a
 persistent marker. Actions may be synchronous or asynchronous.
 
+## Motivation
+
+Apps often repeat the same bookkeeping: check whether an action has completed,
+run it if needed, and record its successful completion. The library centralizes
+that control so application code can express the intent instead of
+reimplementing it for each action. This follows the DRY (Don't Repeat Yourself)
+principle: keep the execution rules in one place rather than duplicating them
+across the app.
+
+For example, after initialization, a screen visited multiple times can request a
+refresh without repeating an action already recorded as complete for the local
+calendar day of the call:
+
+```dart
+await Execution.instance.doDaily(
+  key: 'refresh-reference-data',
+  function: () => refreshReferenceData(),
+);
+```
+
+A call uses the local calendar day when it is made, even if the callback runs
+later. After the callback succeeds and its marker is recorded, later calls
+through the same singleton for that day skip the action. The call does not
+schedule a daily refresh, and failures can be retried. Persistence and
+interruptions impose limits; this is not an exactly-once guarantee. See
+[Concurrency and persistence](#concurrency-and-persistence).
+
+Starting too much work before `runApp` or as an app opens can delay the first
+frame or compete with UI work. Developers can decide when to call non-essential
+actions and distribute them over time. The library already provides an in-memory
+queue with bounded concurrency, but it does not wait for the first frame,
+schedule OS background work, or move CPU work to another isolate. First-frame-aware
+or lifecycle-aware scheduling would require application code or a future
+extension; it is not currently provided by the library. Any effect on startup or
+responsiveness depends on the workload and should be measured in a representative
+app and on representative devices.
+
 ## Installation
 
 ```yaml
