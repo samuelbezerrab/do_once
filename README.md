@@ -15,6 +15,7 @@ await Do.once(
 
 do_once runs actions identified by a key once per session, once per local day, or once until reset. It automatically queues actions to limit concurrent work and supports both synchronous and asynchronous callbacks.
 
+[!TIP]
 Following the Don’t Repeat Yourself (DRY) principle, it tracks completed actions so you don’t have to write the same checks throughout your app.
 
 ## How to use
