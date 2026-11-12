@@ -25,20 +25,17 @@ Future<void> main() async {
       // This benchmark runs under flutter_test, outside the test/ directory.
       // ignore: invalid_use_of_visible_for_testing_member
       SharedPreferences.setMockInitialValues({});
-      await Execution.instance.initialize();
       final stopwatch = Stopwatch()..start();
       final futures = <Future<void>>[];
       for (var i = 0; i < count; i++) {
         futures.add(queued
-            ? Execution.instance
-                .doOnceOnSession(key: 'job-$i', function: action)
+            ? Do.oncePerSession(key: 'job-$i', function: action)
             : action());
       }
       await Future<void>.delayed(Duration.zero);
       final eventLatency = stopwatch.elapsedMicroseconds;
       await Future.wait(futures);
       final total = stopwatch.elapsedMicroseconds;
-      await Execution.instance.dispose();
       return [eventLatency, total];
     }
 

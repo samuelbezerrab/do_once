@@ -15,16 +15,13 @@ class ExecutionExample extends StatefulWidget {
 class _ExecutionExampleState extends State<ExecutionExample> {
   @override
   void initState() {
-    Execution.instance.initialize().then((_) {
-      Execution.instance.doOnceForever(
-        key: 'printOnce',
-        function: () => print(
-          '============== Print only once forever ===============',
-        ),
-      );
-    });
-
     super.initState();
+    Do.once(
+      key: 'printOnce',
+      function: () => print(
+        '============== Print only once forever ===============',
+      ),
+    );
   }
 
   @override
@@ -54,15 +51,6 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // ElevatedButton(onPressed: onPressed, child: child)
-            ElevatedButton(
-              onPressed: () {
-                Execution.instance.dispose();
-              },
-              child: Text(
-                'dispose',
-              ),
-            ),
             ElevatedButton(
               onPressed: () {
                 Navigator.push(
@@ -93,14 +81,13 @@ class NextPage extends StatefulWidget {
 class _NextPageState extends State<NextPage> {
   @override
   void initState() {
-    Execution.instance.doOnceOnSession(
+    super.initState();
+    Do.oncePerSession(
       key: 'printonceOnSession',
       function: () async => await Future.delayed(Duration(seconds: 5)).then(
           (_) => print(
               '============= Print only once on session ===============')),
     );
-
-    super.initState();
   }
 
   @override

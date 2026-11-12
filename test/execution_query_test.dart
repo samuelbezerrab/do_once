@@ -29,174 +29,121 @@ class PendingStore extends InMemorySharedPreferencesStore {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('a session action is reported after it completes', () async {
+  var testNumber = 0;
+  String key(String name) => '$testNumber/$name';
+  setUp(() {
+    testNumber++;
     SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
-    await Execution.instance.dispose();
-    await Execution.instance.initialize();
-
-    expect(
-        Execution.instance
-            .hasExecuted(key: 'action', scope: ExecutionScope.session),
-        false);
-    await Execution.instance.doOnceOnSession(key: 'action', function: () {});
-    expect(
-        Execution.instance
-            .hasExecuted(key: 'action', scope: ExecutionScope.session),
-        true);
+    Do.configure(maxConcurrent: 1);
   });
 
-  test('a permanent action is reported independently of the session', () async {
-    SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
-    await Execution.instance.dispose();
-    await Execution.instance.initialize();
-
-    expect(
-        Execution.instance
-            .hasExecuted(key: 'permanent', scope: ExecutionScope.forever),
-        false);
-    await Execution.instance.doOnceForever(key: 'permanent', function: () {});
-    expect(
-        Execution.instance
-            .hasExecuted(key: 'permanent', scope: ExecutionScope.forever),
-        true);
-    expect(
-        Execution.instance
-            .hasExecuted(key: 'permanent', scope: ExecutionScope.session),
-        false);
-  });
-
-  test('daily completion is reported only for the current local day', () async {
-    SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
-    await Execution.instance.dispose();
-    await Execution.instance.initialize();
-    final day = Clock.fixed(DateTime(2024, 1, 1, 23, 59));
-    final nextDay = Clock.fixed(DateTime(2024, 1, 2));
-
-    expect(
-        withClock(
-            day,
-            () => Execution.instance
-                .hasExecuted(key: 'daily', scope: ExecutionScope.daily)),
-        false);
-    await withClock(
-        day, () => Execution.instance.doDaily(key: 'daily', function: () {}));
-    expect(
-        withClock(
-            day,
-            () => Execution.instance
-                .hasExecuted(key: 'daily', scope: ExecutionScope.daily)),
-        true);
-    expect(
-        withClock(
-            nextDay,
-            () => Execution.instance
-                .hasExecuted(key: 'daily', scope: ExecutionScope.daily)),
-        false);
-  });
-
-  final runners = <ExecutionScope,
-      Future<void> Function(String, FutureOr<dynamic> Function())>{
-    ExecutionScope.session: (key, action) =>
-        Execution.instance.doOnceOnSession(key: key, function: action),
-    ExecutionScope.forever: (key, action) =>
-        Execution.instance.doOnceForever(key: key, function: action),
-    ExecutionScope.daily: (key, action) =>
-        Execution.instance.doDaily(key: key, function: action),
+  final runners =
+      <DoScope, Future<void> Function(String, FutureOr<dynamic> Function())>{
+    DoScope.session: (key, action) =>
+        Do.oncePerSession(key: key, function: action),
+    DoScope.forever: (key, action) => Do.once(key: key, function: action),
+    DoScope.daily: (key, action) => Do.oncePerDay(key: key, function: action),
   };
 
-  for (final scope in ExecutionScope.values) {
-    test('$scope query observes a pending action without executing it again',
-        () async {
-      SharedPreferences.setMockInitialValues({});
-      await Execution.instance.initialize();
-      await Execution.instance.dispose();
-      await Execution.instance.initialize();
+  for (final scope in DoScope.values) {
+    test('$scope reports completion only after the action finishes', () async {
+      final actionKey = key('pending');
       final gate = Completer<void>();
+      final started = Completer<void>();
       var calls = 0;
-      final execution = runners[scope]!('pending-$scope', () {
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), false);
+      final execution = runners[scope]!(actionKey, () {
         calls++;
+        started.complete();
         return gate.future;
       });
-      expect(
-          Execution.instance.hasExecuted(key: 'pending-$scope', scope: scope),
-          false);
-      expect(
-          Execution.instance.hasExecuted(key: 'pending-$scope', scope: scope),
-          false);
+      await started.future;
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), false);
       expect(calls, 1);
       gate.complete();
       await execution;
-      expect(
-          Execution.instance.hasExecuted(key: 'pending-$scope', scope: scope),
-          true);
-      expect(calls, 1);
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), true);
     });
 
-    test('$scope failed callbacks are not reported as completed', () async {
-      SharedPreferences.setMockInitialValues({});
-      await Execution.instance.initialize();
-      await Execution.instance.dispose();
-      await Execution.instance.initialize();
+    test('$scope does not report a failed callback as completed', () async {
+      final actionKey = key('failed');
       await expectLater(
-          runners[scope]!('failed-$scope', () => throw StateError('failure')),
+          runners[scope]!(actionKey, () => throw StateError('failure')),
           throwsStateError);
-      expect(Execution.instance.hasExecuted(key: 'failed-$scope', scope: scope),
-          false);
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), false);
+    });
+
+    test('revoking $scope affects only that scope', () async {
+      final actionKey = key('revoked');
+      for (final s in DoScope.values) {
+        await runners[s]!(actionKey, () {});
+      }
+      await Do.revoke(key: actionKey, scope: scope);
+      for (final s in DoScope.values) {
+        expect(await Do.hasExecuted(key: actionKey, scope: s), s != scope);
+      }
+      var reran = false;
+      await runners[scope]!(actionKey, () => reran = true);
+      expect(reran, true);
+    });
+
+    test('revoking $scope does not wait for a running action', () async {
+      final actionKey = key('running');
+      final gate = Completer<void>();
+      final started = Completer<void>();
+      final execution = runners[scope]!(actionKey, () {
+        started.complete();
+        return gate.future;
+      });
+      await started.future;
+      await Do.revoke(key: actionKey, scope: scope);
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), false);
+      gate.complete();
+      await execution;
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), true);
     });
   }
 
-  for (final scope in [ExecutionScope.forever, ExecutionScope.daily]) {
+  for (final scope in [DoScope.forever, DoScope.daily]) {
     test('$scope remains incomplete while marker persistence is pending',
         () async {
-      SharedPreferences.setMockInitialValues({});
       final store = PendingStore();
       SharedPreferencesStorePlatform.instance = store;
-      await Execution.instance.initialize();
-      final key = 'pending-write-$scope';
-      final execution = runners[scope]!(key, () {});
+      final actionKey = key('pending-write');
+      final execution = runners[scope]!(actionKey, () {});
       await store.started.future;
-      expect(Execution.instance.hasExecuted(key: key, scope: scope), false);
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), false);
       store.finish.complete();
       await execution;
-      expect(Execution.instance.hasExecuted(key: key, scope: scope), true);
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), true);
     });
 
-    test('$scope ignores the cached marker when persistence fails', () async {
-      SharedPreferences.setMockInitialValues({});
+    test('$scope ignores the cached marker after a failed write', () async {
       SharedPreferencesStorePlatform.instance = FailingStore();
-      await Execution.instance.initialize();
-      final key = 'write-failure-$scope';
-      await expectLater(runners[scope]!(key, () {}), throwsStateError);
-      expect(Execution.instance.hasExecuted(key: key, scope: scope), false);
+      final actionKey = key('write-failure');
+      await expectLater(runners[scope]!(actionKey, () {}), throwsStateError);
+      expect(await Do.hasExecuted(key: actionKey, scope: scope), false);
     });
   }
 
-  test('revocation clears session and permanent but not daily completion',
+  test('daily query and revocation affect only the current local day',
       () async {
-    SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
-    await Execution.instance.dispose();
-    await Execution.instance.initialize();
-    for (final scope in ExecutionScope.values) {
-      await runners[scope]!('revoked', () {});
-      expect(
-          Execution.instance.hasExecuted(key: 'revoked', scope: scope), true);
-    }
-    await Execution.instance.revokeKey('revoked');
+    final actionKey = key('daily');
+    final firstDay = Clock.fixed(DateTime(2024, 1, 1, 23, 59));
+    final nextDay = Clock.fixed(DateTime(2024, 1, 2));
+    await withClock(
+        firstDay, () => Do.oncePerDay(key: actionKey, function: () {}));
+    await withClock(
+        nextDay, () => Do.oncePerDay(key: actionKey, function: () {}));
+    await withClock(
+        nextDay, () => Do.revoke(key: actionKey, scope: DoScope.daily));
     expect(
-        Execution.instance
-            .hasExecuted(key: 'revoked', scope: ExecutionScope.session),
-        false);
-    expect(
-        Execution.instance
-            .hasExecuted(key: 'revoked', scope: ExecutionScope.forever),
-        false);
-    expect(
-        Execution.instance
-            .hasExecuted(key: 'revoked', scope: ExecutionScope.daily),
+        await withClock(firstDay,
+            () => Do.hasExecuted(key: actionKey, scope: DoScope.daily)),
         true);
+    expect(
+        await withClock(nextDay,
+            () => Do.hasExecuted(key: actionKey, scope: DoScope.daily)),
+        false);
   });
 }

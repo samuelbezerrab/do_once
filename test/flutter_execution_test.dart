@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:clock/clock.dart';
-import 'package:flutter_test/flutter_test.dart';
 import 'package:do_once/do_once.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
@@ -28,41 +28,43 @@ class FailingStore extends InMemorySharedPreferencesStore {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() async {
+  var testNumber = 0;
+  String key(String name) => '$testNumber/$name';
+  setUp(() {
+    testNumber++;
     SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
-    await Execution.instance.dispose();
-    await Execution.instance.initialize();
-  });
-
-  test('overlapping session calls share one execution', () async {
-    final gate = Completer<void>();
-    var calls = 0;
-    Future<void> action() async {
-      calls++;
-      await gate.future;
-    }
-
-    final first =
-        Execution.instance.doOnceOnSession(key: 'key', function: action);
-    final second =
-        Execution.instance.doOnceOnSession(key: 'key', function: action);
-    expect(calls, 1);
-    gate.complete();
-    await Future.wait([first, second]);
-    expect(calls, 1);
+    Do.configure(maxConcurrent: 1);
   });
 
   final runners = <String, Run>{
-    'session': (key, action) =>
-        Execution.instance.doOnceOnSession(key: key, function: action),
-    'forever': (key, action) =>
-        Execution.instance.doOnceForever(key: key, function: action),
-    'daily': (key, action) =>
-        Execution.instance.doDaily(key: key, function: action),
+    'session': (key, action) => Do.oncePerSession(key: key, function: action),
+    'forever': (key, action) => Do.once(key: key, function: action),
+    'daily': (key, action) => Do.oncePerDay(key: key, function: action),
   };
-  runners.forEach((scope, run) {
-    test('$scope shares a directly thrown callback error', () async {
+
+  for (final entry in runners.entries) {
+    test('${entry.key} shares overlapping calls and the first function',
+        () async {
+      final gate = Completer<void>();
+      final started = Completer<void>();
+      var firstCalls = 0;
+      var otherCalls = 0;
+      final first = entry.value(key('success'), () async {
+        firstCalls++;
+        started.complete();
+        await gate.future;
+      });
+      final second = entry.value(key('success'), () => otherCalls++);
+      await started.future;
+      expect(firstCalls, 1);
+      expect(otherCalls, 0);
+      gate.complete();
+      await Future.wait([first, second]);
+      await entry.value(key('success'), () => otherCalls++);
+      expect(otherCalls, 0);
+    });
+
+    test('${entry.key} shares a directly thrown synchronous error', () async {
       final error = StateError('synchronous callback failure');
       var calls = 0;
       dynamic action() {
@@ -70,71 +72,63 @@ void main() {
         throw error;
       }
 
-      final first = run('direct-sync', action);
-      final second = run('direct-sync', action);
+      final first = entry.value(key('direct-error'), action);
+      final second = entry.value(key('direct-error'), action);
       await Future.wait([
         expectLater(first, throwsA(same(error))),
         expectLater(second, throwsA(same(error))),
       ]);
       expect(calls, 1);
-      await run('direct-sync', () {
-        calls++;
-      });
+      await entry.value(key('direct-error'), () => calls++);
       expect(calls, 2);
     });
-    test('$scope shares an overlapping success', () async {
-      final gate = Completer<void>();
-      var calls = 0;
-      Future<void> action() async {
-        calls++;
-        await gate.future;
-      }
 
-      final first = run('success', action);
-      final second = run('success', action);
-      expect(calls, 1);
-      gate.complete();
-      await Future.wait([first, second]);
-      await run('success', action);
-      expect(calls, 1);
-    });
     for (final synchronous in [true, false]) {
       test(
-          '$scope shares ${synchronous ? 'sync' : 'async'} errors and permits retry',
+          '${entry.key} shares ${synchronous ? 'sync' : 'async'} errors and retries',
           () async {
         final gate = Completer<void>();
         final error = StateError('callback failed');
         var calls = 0;
-        FutureOr<dynamic> action() {
+        final first = entry.value(key('error'), () async {
           calls++;
-          if (synchronous) throw error;
-          return gate.future;
-        }
-
-        // Keep the first attempt pending so both callers join it, then throw.
-        final blocker = Completer<void>();
-        Future<void> delayed() async {
-          await blocker.future;
-          await action();
-        }
-
-        final first = run('error', delayed);
-        final second = run('error', delayed);
-        final firstCheck = expectLater(first, throwsA(same(error)));
-        final secondCheck = expectLater(second, throwsA(same(error)));
-        blocker.complete();
-        if (!synchronous) {
-          await Future<void>.delayed(Duration.zero);
-          gate.completeError(error);
-        }
-        await Future.wait([firstCheck, secondCheck]);
-        expect(calls, 1);
-        await run('error', () {
-          calls++;
+          if (!synchronous) await gate.future;
+          throw error;
         });
+        final second = entry.value(key('error'), () => calls += 100);
+        final checks = [
+          expectLater(first, throwsA(same(error))),
+          expectLater(second, throwsA(same(error))),
+        ];
+        if (!synchronous) gate.complete();
+        await Future.wait(checks);
+        expect(calls, 1);
+        await entry.value(key('error'), () => calls++);
         expect(calls, 2);
       });
     }
+  }
+
+  test('onceAndDone shares the permanent marker and in-flight attempt',
+      () async {
+    final gate = Completer<void>();
+    final started = Completer<void>();
+    var calls = 0;
+    final first = Do.onceAndDone(
+        key: key('alias'),
+        function: () async {
+          calls++;
+          started.complete();
+          await gate.future;
+        });
+    final second = Do.once(key: key('alias'), function: () => calls += 100);
+    await started.future;
+    gate.complete();
+    await Future.wait([first, second]);
+    await Do.onceAndDone(key: key('alias'), function: () => calls += 100);
+    expect(calls, 1);
+    expect(
+        await Do.hasExecuted(key: key('alias'), scope: DoScope.forever), true);
   });
 
   for (final scope in ['forever', 'daily']) {
@@ -151,44 +145,51 @@ void main() {
           await gate.future;
         }
 
-        final first = runners[scope]!('write-$scope-$throws', action);
-        final second = runners[scope]!('write-$scope-$throws', action);
+        final first = runners[scope]!(key('write'), action);
+        final second = runners[scope]!(key('write'), action);
         final checks = [
           expectLater(first, throwsA(anything)),
-          expectLater(second, throwsA(anything))
+          expectLater(second, throwsA(anything)),
         ];
         gate.complete();
         await Future.wait(checks);
         expect(calls, 1);
         expect(store.writes, 1);
-        await runners[scope]!('write-$scope-$throws', () {
-          calls++;
-        });
+        await runners[scope]!(key('write'), () => calls++);
         expect(calls, 2);
         expect(store.writes, 2);
       });
     }
   }
 
-  test('formerly colliding dates are distinct and ignore legacy markers',
-      () async {
-    SharedPreferences.setMockInitialValues(
-        {'A2S-Execution_1112024_date': true});
-    await Execution.instance.initialize();
+  test('distinct calendar dates have distinct markers', () async {
     var calls = 0;
-    Future<void> run(DateTime date) => withClock(
-        Clock.fixed(date),
-        () => Execution.instance.doDaily(
-            key: 'date',
-            function: () {
-              calls++;
-            }));
+    Future<void> run(DateTime date) => withClock(Clock.fixed(date),
+        () => Do.oncePerDay(key: key('date'), function: () => calls++));
     await run(DateTime(2024, 1, 11));
     await run(DateTime(2024, 11, 1));
     await run(DateTime(2024, 1, 11));
     expect(calls, 2);
-    final prefs = await SharedPreferences.getInstance();
-    expect(prefs.getBool('A2S-Execution_1112024_date'), true);
+  });
+
+  test('a queued daily action uses the local date at call time', () async {
+    final gate = Completer<void>();
+    final blocker =
+        Do.oncePerSession(key: key('blocker'), function: () => gate.future);
+    final day = Clock.fixed(DateTime(2024, 1, 1, 23, 59));
+    final nextDay = Clock.fixed(DateTime(2024, 1, 2));
+    final action = withClock(
+        day, () => Do.oncePerDay(key: key('queued-day'), function: () {}));
+    gate.complete();
+    await Future.wait([blocker, action]);
+    expect(
+        await withClock(day,
+            () => Do.hasExecuted(key: key('queued-day'), scope: DoScope.daily)),
+        true);
+    expect(
+        await withClock(nextDay,
+            () => Do.hasExecuted(key: key('queued-day'), scope: DoScope.daily)),
+        false);
   });
 
   for (final fails in [false, true]) {
@@ -196,74 +197,57 @@ void main() {
         'daily serializes different days after ${fails ? 'failure' : 'success'}',
         () async {
       final oldGate = Completer<void>();
-      final newGate = Completer<void>();
-      var active = 0;
-      var oldCalls = 0;
-      var newCalls = 0;
+      final oldStarted = Completer<void>();
+      final nextStarted = Completer<void>();
       final error = StateError('old day failed');
+      var active = false;
+      var nextCalls = 0;
       final first = withClock(
           Clock.fixed(DateTime(2024, 1, 1, 23, 59)),
-          () => Execution.instance.doDaily(
-              key: 'midnight',
+          () => Do.oncePerDay(
+              key: key('midnight'),
               function: () async {
-                oldCalls++;
-                active++;
+                active = true;
+                oldStarted.complete();
                 await oldGate.future;
-                active--;
+                active = false;
                 if (fails) throw error;
               }));
       final firstCheck = fails
           ? expectLater(first, throwsA(same(error)))
           : expectLater(first, completes);
+      await oldStarted.future;
       Future<void> next() => withClock(
           Clock.fixed(DateTime(2024, 1, 2)),
-          () => Execution.instance.doDaily(
-              key: 'midnight',
-              function: () async {
-                expect(active, 0);
-                active++;
-                newCalls++;
-                await newGate.future;
-                active--;
+          () => Do.oncePerDay(
+              key: key('midnight'),
+              bypassQueue: true,
+              function: () {
+                expect(active, false);
+                nextCalls++;
+                nextStarted.complete();
               }));
       final second = next();
       final third = next();
-      expect(oldCalls, 1);
-      expect(newCalls, 0);
+      expect(nextCalls, 0);
       oldGate.complete();
       await firstCheck;
-      await Future<void>.delayed(Duration.zero);
-      expect(newCalls, 1);
-      newGate.complete();
+      await nextStarted.future;
       await Future.wait([second, third]);
-      expect(newCalls, 1);
+      expect(nextCalls, 1);
     });
   }
 
-  test('independent keys and scopes proceed while another execution waits',
-      () async {
+  test('independent keys and scopes proceed with bypass', () async {
     final gate = Completer<void>();
-    final first = Execution.instance
-        .doOnceOnSession(key: 'same', function: () => gate.future);
+    final first =
+        Do.oncePerSession(key: key('same'), function: () => gate.future);
     var calls = 0;
-    await Execution.instance.doOnceOnSession(
-        key: 'other',
-        bypassQueue: true,
-        function: () {
-          calls++;
-        });
-    await Execution.instance.doOnceForever(
-        key: 'same',
-        bypassQueue: true,
-        function: () {
-          calls++;
-        });
-    await Execution.instance.doDaily(
-        key: 'same',
-        bypassQueue: true,
-        function: () {
-          calls++;
-        });
+    await Do.oncePerSession(
+        key: key('other'), bypassQueue: true, function: () => calls++);
+    await Do.once(key: key('same'), bypassQueue: true, function: () => calls++);
+    await Do.oncePerDay(
+        key: key('same'), bypassQueue: true, function: () => calls++);
     expect(calls, 3);
     gate.complete();
     await first;
@@ -271,18 +255,9 @@ void main() {
 
   test('daily and permanent markers cannot collide across keys', () async {
     var calls = 0;
-    await withClock(
-        Clock.fixed(DateTime(2024, 1, 1)),
-        () => Execution.instance.doDaily(
-            key: 'item',
-            function: () {
-              calls++;
-            }));
-    await Execution.instance.doOnceForever(
-        key: 'daily-v2_2024-01-01_item',
-        function: () {
-          calls++;
-        });
+    await withClock(Clock.fixed(DateTime(2024, 1, 1)),
+        () => Do.oncePerDay(key: 'item', function: () => calls++));
+    await Do.once(key: 'daily_v2_2024-01-01_item', function: () => calls++);
     expect(calls, 2);
   });
 }

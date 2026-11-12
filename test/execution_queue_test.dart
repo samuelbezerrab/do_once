@@ -6,8 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
-class _FailFirstWrite extends InMemorySharedPreferencesStore {
-  _FailFirstWrite() : super.empty();
+class FailFirstWriteStore extends InMemorySharedPreferencesStore {
+  FailFirstWriteStore() : super.empty();
   bool fail = true;
 
   @override
@@ -23,57 +23,138 @@ class _FailFirstWrite extends InMemorySharedPreferencesStore {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('actions start in FIFO order with one slot by default', () async {
+  var testNumber = 0;
+  String key(String name) => '$testNumber/$name';
+  setUp(() {
+    testNumber++;
     SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
+    Do.configure(maxConcurrent: 1);
+  });
+
+  test('actions start in FIFO order with one slot by default', () async {
     final gate = Completer<void>();
     final started = <String>[];
-    final first = Execution.instance.doOnceOnSession(
-        key: 'first',
+    final first = Do.oncePerSession(
+        key: key('first'),
         function: () {
           started.add('first');
           return gate.future;
         });
-    final second = Execution.instance.doOnceOnSession(
-        key: 'second',
+    final second = Do.oncePerSession(
+        key: key('second'),
         function: () {
           started.add('second');
         });
-    await Future<void>.delayed(Duration.zero);
     expect(started, ['first']);
     gate.complete();
     await Future.wait([first, second]);
     expect(started, ['first', 'second']);
-    await Execution.instance.dispose();
   });
 
-  for (final fail in [false, true]) {
+  test('increasing the limit starts waiting actions immediately in FIFO order',
+      () async {
+    final gate = Completer<void>();
+    final started = <String>[];
+    Future<void> run(String name) => Do.oncePerSession(
+        key: key(name),
+        function: () {
+          started.add(name);
+          return gate.future;
+        });
+    final actions = [run('a'), run('b'), run('c'), run('d')];
+    expect(started, ['a']);
+    Do.configure(maxConcurrent: 3);
+    expect(started, ['a', 'b', 'c']);
+    gate.complete();
+    await Future.wait(actions);
+    expect(started, ['a', 'b', 'c', 'd']);
+  });
+
+  test('decreasing the limit does not interrupt running actions', () async {
+    Do.configure(maxConcurrent: 3);
+    final gates = List.generate(4, (_) => Completer<void>());
+    final started = <int>[];
+    Future<void> run(int i) => Do.oncePerSession(
+        key: key('$i'),
+        function: () {
+          started.add(i);
+          return gates[i].future;
+        });
+    final actions = [for (var i = 0; i < 4; i++) run(i)];
+    expect(started, [0, 1, 2]);
+    Do.configure(maxConcurrent: 1);
+    gates[0].complete();
+    await actions[0];
+    await Future<void>.delayed(Duration.zero);
+    expect(started, [0, 1, 2]);
+    gates[1].complete();
+    await actions[1];
+    await Future<void>.delayed(Duration.zero);
+    expect(started, [0, 1, 2]);
+    gates[2].complete();
+    await actions[2];
+    await Future<void>.delayed(Duration.zero);
+    expect(started, [0, 1, 2, 3]);
+    gates[3].complete();
+    await actions[3];
+  });
+
+  test('invalid concurrency is rejected without changing the current limit',
+      () async {
+    expect(() => Do.configure(maxConcurrent: 0), throwsArgumentError);
+    expect(() => Do.configure(maxConcurrent: -1), throwsArgumentError);
+    final gate = Completer<void>();
+    var started = 0;
+    final first = Do.oncePerSession(key: key('a'), function: () => gate.future);
+    final second = Do.oncePerSession(key: key('b'), function: () => started++);
+    expect(started, 0);
+    gate.complete();
+    await Future.wait([first, second]);
+    expect(started, 1);
+  });
+
+  test('bypassed actions do not occupy configured slots', () async {
+    Do.configure(maxConcurrent: 2);
+    final gate = Completer<void>();
+    final started = <String>[];
+    Future<void> run(String name, {bool bypass = false}) => Do.oncePerSession(
+        key: key(name),
+        bypassQueue: bypass,
+        function: () {
+          started.add(name);
+          return gate.future;
+        });
+    final first = run('a');
+    final second = run('b');
+    final third = run('c');
+    final bypass = run('d', bypass: true);
+    expect(started, ['a', 'b', 'd']);
+    gate.complete();
+    await Future.wait([first, second, third, bypass]);
+    expect(started, ['a', 'b', 'd', 'c']);
+  });
+
+  for (final fails in [false, true]) {
     test(
-        'promotion uses the original callback and shares ${fail ? 'errors' : 'success'}',
+        'promotion preserves the first function and shares ${fails ? 'errors' : 'success'}',
         () async {
-      SharedPreferences.setMockInitialValues({});
-      await Execution.instance.initialize();
       final gate = Completer<void>();
       final active = Completer<void>();
       final error = StateError('promoted');
       var original = 0;
       var replacement = 0;
-      final blocker = Execution.instance
-          .doOnceOnSession(key: 'blocker', function: () => gate.future);
-      final pending = Execution.instance.doOnceOnSession(
-          key: 'item',
+      final blocker =
+          Do.oncePerSession(key: key('block'), function: () => gate.future);
+      final pending = Do.oncePerSession(
+          key: key('item'),
           function: () async {
             original++;
             await active.future;
-            if (fail) throw error;
+            if (fails) throw error;
           });
-      final promoted = Execution.instance.doOnceOnSession(
-          key: 'item',
-          bypassQueue: true,
-          function: () {
-            replacement++;
-          });
-      final checks = fail
+      final promoted = Do.oncePerSession(
+          key: key('item'), bypassQueue: true, function: () => replacement++);
+      final checks = fails
           ? [
               expectLater(pending, throwsA(same(error))),
               expectLater(promoted, throwsA(same(error)))
@@ -85,87 +166,85 @@ void main() {
       await Future.wait(checks);
       gate.complete();
       await blocker;
-      await Execution.instance.dispose();
+      await Future<void>.delayed(Duration.zero);
       expect(original, 1);
     });
   }
 
-  test('parallel limit and bypass do not share slots', () async {
-    SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize(maxConcurrent: 2);
-    final gate = Completer<void>();
-    final started = <String>[];
-    Future<void> run(String key, {bool bypass = false}) =>
-        Execution.instance.doOnceOnSession(
-            key: key,
-            bypassQueue: bypass,
-            function: () {
-              started.add(key);
-              return gate.future;
-            });
-    final first = run('a');
-    final second = run('b');
-    final third = run('c');
-    final immediate = run('d', bypass: true);
-    expect(started, ['a', 'b', 'd']);
-    gate.complete();
-    await Future.wait([first, second, third, immediate]);
-    expect(started, ['a', 'b', 'd', 'c']);
-    await Execution.instance.dispose();
-  });
-
-  test('invalid concurrency is rejected', () async {
-    await expectLater(
-        Execution.instance.initialize(maxConcurrent: 0), throwsArgumentError);
-    await expectLater(
-        Execution.instance.initialize(maxConcurrent: -1), throwsArgumentError);
-  });
-
-  test(
-      'dispose drains queued and bypass actions, rejects new ones, and handles errors',
+  test('bypass joins an already running attempt and cannot rerun completion',
       () async {
-    SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
     final gate = Completer<void>();
-    final immediateGate = Completer<void>();
-    final first = Execution.instance
-        .doOnceOnSession(key: 'a', function: () => gate.future);
-    final second = Execution.instance
-        .doOnceOnSession(key: 'b', function: () => throw StateError('failure'));
-    final secondCheck = expectLater(second, throwsStateError);
-    final immediate = Execution.instance.doOnceOnSession(
-        key: 'c', bypassQueue: true, function: () => immediateGate.future);
-    var disposed = false;
-    final disposal = Execution.instance.dispose().then((_) {
-      disposed = true;
-    });
-    await expectLater(
-        Execution.instance.doOnceOnSession(key: 'd', function: () {}),
-        throwsStateError);
+    var calls = 0;
+    final first = Do.oncePerSession(
+        key: key('running'),
+        function: () async {
+          calls++;
+          await gate.future;
+        });
+    final second = Do.oncePerSession(
+        key: key('running'), bypassQueue: true, function: () => calls += 100);
     gate.complete();
-    await first;
-    await secondCheck;
-    expect(disposed, false);
-    immediateGate.complete();
-    await immediate;
-    await disposal;
-    expect(disposed, true);
+    await Future.wait([first, second]);
+    await Do.oncePerSession(
+        key: key('running'), bypassQueue: true, function: () => calls += 100);
+    expect(calls, 1);
+  });
+
+  test('onceAndDone can promote a pending once with the original function',
+      () async {
+    final gate = Completer<void>();
+    final blocker =
+        Do.oncePerSession(key: key('block'), function: () => gate.future);
+    var original = 0;
+    var replacement = 0;
+    final pending = Do.once(key: key('alias'), function: () => original++);
+    final promoted = Do.onceAndDone(
+        key: key('alias'), bypassQueue: true, function: () => replacement++);
+    await Future.wait([pending, promoted]);
+    expect(original, 1);
+    expect(replacement, 0);
+    gate.complete();
+    await blocker;
+    await Future<void>.delayed(Duration.zero);
+    expect(original, 1);
+  });
+
+  test('a failed marker write does not stop the queue and can be retried',
+      () async {
+    SharedPreferencesStorePlatform.instance = FailFirstWriteStore();
+    final gate = Completer<void>();
+    final started = Completer<void>();
+    final first = Do.once(
+        key: key('failing'),
+        function: () {
+          started.complete();
+          return gate.future;
+        });
+    final failure = expectLater(first, throwsStateError);
+    await started.future;
+    var otherRan = false;
+    final other =
+        Do.oncePerSession(key: key('other'), function: () => otherRan = true);
+    gate.complete();
+    await Future.wait([failure, other]);
+    expect(otherRan, true);
+    var retried = false;
+    await Do.once(key: key('failing'), function: () => retried = true);
+    expect(retried, true);
   });
 
   for (final fail in [false, true]) {
     test(
-        'promoted next day waits without blocking the earlier pending day after ${fail ? 'failure' : 'success'}',
+        'promoted next day waits for earlier pending day after ${fail ? 'failure' : 'success'}',
         () async {
-      SharedPreferences.setMockInitialValues({});
-      await Execution.instance.initialize();
       final gate = Completer<void>();
       final order = <String>[];
-      final blocker = Execution.instance
-          .doOnceOnSession(key: 'block', function: () => gate.future);
+      final blocker =
+          Do.oncePerSession(key: key('block'), function: () => gate.future);
       final old = withClock(
-          Clock.fixed(DateTime(2024, 1, 1, 23, 59)),
-          () => Execution.instance.doDaily(
-              key: 'daily',
+          Clock.fixed(DateTime(2024, 1, 1)),
+          () => Do.oncePerDay(
+              key: key('daily'),
               function: () {
                 order.add('old');
                 if (fail) throw StateError('old');
@@ -175,110 +254,18 @@ void main() {
           : expectLater(old, completes);
       final next = withClock(
           Clock.fixed(DateTime(2024, 1, 2)),
-          () => Execution.instance.doDaily(
-              key: 'daily',
-              function: () {
-                order.add('next');
-              }));
+          () => Do.oncePerDay(
+              key: key('daily'), function: () => order.add('next')));
       final promoted = withClock(
           Clock.fixed(DateTime(2024, 1, 2)),
-          () => Execution.instance.doDaily(
-              key: 'daily',
+          () => Do.oncePerDay(
+              key: key('daily'),
               bypassQueue: true,
-              function: () {
-                order.add('wrong');
-              }));
+              function: () => order.add('wrong')));
       expect(order, isEmpty);
       gate.complete();
       await Future.wait([blocker, oldCheck, next, promoted]);
       expect(order, ['old', 'next']);
-      await Execution.instance.dispose();
     });
   }
-
-  test('bypass does not rerun a completed action', () async {
-    SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
-    var calls = 0;
-    await Execution.instance.doOnceOnSession(
-        key: 'done',
-        function: () {
-          calls++;
-        });
-    await Execution.instance.doOnceOnSession(
-        key: 'done',
-        bypassQueue: true,
-        function: () {
-          calls++;
-        });
-    expect(calls, 1);
-    await Execution.instance.dispose();
-  });
-
-  test('concurrency cannot change while initialized', () async {
-    SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
-    await expectLater(
-        Execution.instance.initialize(maxConcurrent: 2), throwsStateError);
-    await Execution.instance.dispose();
-  });
-
-  test('bypass joins an already running attempt using its original callback',
-      () async {
-    SharedPreferences.setMockInitialValues({});
-    await Execution.instance.initialize();
-    final gate = Completer<void>();
-    final error = StateError('running failed');
-    var calls = 0;
-    final first = Execution.instance.doOnceOnSession(
-        key: 'running',
-        function: () async {
-          calls++;
-          await gate.future;
-          throw error;
-        });
-    final second = Execution.instance.doOnceOnSession(
-        key: 'running',
-        bypassQueue: true,
-        function: () {
-          calls += 100;
-        });
-    final checks = [
-      expectLater(first, throwsA(same(error))),
-      expectLater(second, throwsA(same(error)))
-    ];
-    await Execution.instance.initialize();
-    gate.complete();
-    await Future.wait(checks);
-    expect(calls, 1);
-    await Execution.instance.dispose();
-  });
-
-  test('a failed marker write does not stop the queue and can be retried',
-      () async {
-    SharedPreferences.setMockInitialValues({});
-    SharedPreferencesStorePlatform.instance = _FailFirstWrite();
-    await Execution.instance.initialize();
-    final gate = Completer<void>();
-    final first = Execution.instance
-        .doOnceForever(key: 'failing', function: () => gate.future);
-    final failure = expectLater(first, throwsStateError);
-    var otherRan = false;
-    final other = Execution.instance.doOnceOnSession(
-        key: 'other',
-        function: () {
-          otherRan = true;
-        });
-    gate.complete();
-    await Future.wait([failure, other]);
-    expect(otherRan, true);
-    var retried = false;
-    await Execution.instance.doOnceForever(
-        key: 'failing',
-        function: () {
-          retried = true;
-        });
-    expect(retried, true);
-    await Execution.instance.dispose();
-  });
 }
